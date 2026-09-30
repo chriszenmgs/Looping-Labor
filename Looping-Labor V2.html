@@ -1,0 +1,828 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Looping-Labor V2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout V2: eine Bildschirmseite ohne Scrollen. Querformat: links Bahn, Zeitsteuerung, Diagramm; rechts Titel und Bedienpult mit zwei Reitern. Hochformat: Bahn und Zeitsteuerung oben, darunter Diagramm neben dem Bedienpult. */
+:root{
+  --bg:#edf0f2; --panel:#fbfcfc; --sunk:#e3e8ec; --ink:#161d24; --muted:#56616c; --line:#d0d7dd; --grid:#e6eaed;
+  --accent:#d4520a; --accent-ink:#ffffff; --track:#27313b;
+  --cG:#1f5fc4; --cN:#177a44; --cRes:#c21d3a; --cZ:#7437bd; --cT:#0d7d85; --cV:#39444f; --cR:#946000; --ref:#8b959e;
+  --warn-bg:#fbe7e9; --ok-bg:#e3f2e8; --chip-bg:rgba(251,252,252,.9);
+  --f-disp:"Barlow Condensed","Arial Narrow",sans-serif;
+  --f-body:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  --gap:10px;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#11161b; --panel:#182028; --sunk:#202a33; --ink:#e5eaee; --muted:#95a2ae; --line:#2d3843; --grid:#1f2830;
+  --accent:#ff8a3d; --accent-ink:#1a0d03; --track:#c7d0d8;
+  --cG:#6fa4ff; --cN:#4fcf86; --cRes:#ff6b7f; --cZ:#b88dff; --cT:#43c9d1; --cV:#b3bdc7; --cR:#e2b24b; --ref:#6d7882;
+  --warn-bg:#3a1c22; --ok-bg:#16301f; --chip-bg:rgba(24,32,40,.9); color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#11161b; --panel:#182028; --sunk:#202a33; --ink:#e5eaee; --muted:#95a2ae; --line:#2d3843; --grid:#1f2830;
+  --accent:#ff8a3d; --accent-ink:#1a0d03; --track:#c7d0d8;
+  --cG:#6fa4ff; --cN:#4fcf86; --cRes:#ff6b7f; --cZ:#b88dff; --cT:#43c9d1; --cV:#b3bdc7; --cR:#e2b24b; --ref:#6d7882;
+  --warn-bg:#3a1c22; --ok-bg:#16301f; --chip-bg:rgba(24,32,40,.9); color-scheme:dark }
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.4}
+
+/* ---------- Raster der Oberfläche ---------- */
+.app{height:100%;display:grid;gap:var(--gap);padding-inline:12px;padding-block:10px;
+  grid-template-columns:minmax(0,1fr) 330px;
+  grid-template-rows:auto minmax(0,.85fr) auto minmax(0,1.15fr);
+  grid-template-areas:"stage head" "stage side" "trans side" "plot side";
+  overflow:hidden}
+.head{grid-area:head} .stage-card{grid-area:stage} .transport{grid-area:trans} .plot-card{grid-area:plot} .side{grid-area:side}
+/* Hochformat (iPad hochkant) */
+@media (orientation:portrait) and (min-width:700px){
+  .app{grid-template-columns:minmax(0,1fr) 330px;
+    grid-template-rows:auto minmax(0,1fr) auto minmax(0,min(580px,55vh));
+    grid-template-areas:"head head" "stage stage" "trans trans" "plot side"}
+  .plot-card{min-height:0}
+}
+/* Schmale Geräte: untereinander, hier darf gescrollt werden */
+@media (max-width:699px){
+  html,body{height:auto}
+  .app{height:auto;overflow:visible;grid-template-columns:minmax(0,1fr);grid-template-rows:none;
+    grid-template-areas:"head" "stage" "trans" "plot" "side"}
+  .stage-card .canvas-wrap{height:300px;flex:none}
+  .plot-card .canvas-wrap{height:240px;flex:none}
+}
+/* Querformat mit wenig Höhe: Diagramm etwas weniger Anteil */
+
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;min-width:0;min-height:0}
+h2{font-family:var(--f-disp);font-weight:600;font-size:1.05rem;text-transform:uppercase;letter-spacing:.08em;margin:0;color:var(--muted)}
+
+/* ---------- Kopf ---------- */
+.head{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+h1{font-family:var(--f-disp);font-weight:700;font-size:2.1rem;letter-spacing:.01em;margin:0;line-height:1}
+h1 span{color:var(--accent)}
+.info-btn{font:inherit;font-weight:700;font-size:.9rem;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:99px;padding:5px 12px;min-height:34px;cursor:pointer}
+.info-btn[aria-expanded="true"]{background:var(--sunk)}
+.sub{margin:0;color:var(--muted);max-width:70ch}
+.info-pop{position:fixed;z-index:20;right:12px;top:58px;width:min(420px,calc(100vw - 24px));background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;box-shadow:0 8px 28px rgba(0,0,0,.18)}
+
+/* ---------- Bühne ---------- */
+.stage-card{padding:8px;display:flex;flex-direction:column;gap:6px}
+.stage-top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px 10px}
+.canvas-wrap{position:relative;flex:1 1 auto;min-height:0}
+.canvas-wrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#stage{border-radius:6px;background:var(--panel);touch-action:none;cursor:grab}
+.chip{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:.85rem;padding:4px 10px;border-radius:99px;background:var(--sunk);color:var(--ink)}
+.chip::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--cN)}
+.chip.fall{background:var(--warn-bg)} .chip.fall::before{background:var(--cRes)}
+.chip.idle::before{background:var(--muted)}
+.overlay{position:absolute;top:6px;right:6px;display:flex;flex-direction:column;align-items:flex-end;gap:6px;pointer-events:none}
+.overlay > *{pointer-events:auto}
+.stage-chip{pointer-events:none;box-shadow:0 0 0 1px var(--line);background:var(--chip-bg)}
+.overlay .seg{box-shadow:0 0 0 1px var(--line)}
+.jumps{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:.88rem;color:var(--muted)}
+
+/* Segmentschalter */
+.seg{display:inline-flex;background:var(--sunk);border-radius:8px;padding:3px;gap:3px}
+.seg button{font:inherit;font-size:.88rem;border:0;background:transparent;color:var(--muted);padding:5px 11px;border-radius:6px;cursor:pointer;min-height:32px}
+.seg button[aria-pressed="true"],.seg button[aria-selected="true"]{background:var(--panel);color:var(--ink);font-weight:700;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+
+/* ---------- Zeitsteuerung ---------- */
+.transport{padding:8px 12px;display:flex;flex-direction:column;gap:6px}
+.trow{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.btn{font:inherit;font-weight:700;font-size:.9rem;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 12px;min-height:40px;cursor:pointer}
+.btn:hover{border-color:var(--muted)}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);min-width:92px;padding-inline:10px}
+.btn.icon{min-width:42px;padding:6px 8px;font-family:var(--f-mono)}
+.btn.small{min-height:32px;font-size:.84rem;padding:4px 9px;font-weight:600}
+#time{flex:1 1 120px;min-width:0}
+.tread{font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-size:.95rem;white-space:nowrap}
+.tread b{font-size:1.15rem}
+select{font:inherit;font-size:.9rem;padding:5px 6px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);min-height:40px}
+.outcome{margin:0;padding:5px 10px;border-radius:8px;background:var(--sunk);font-size:.92rem;line-height:1.35}
+.outcome.bad{background:var(--warn-bg)} .outcome.good{background:var(--ok-bg)}
+
+/* ---------- Diagramm ---------- */
+.plot-card{padding:8px 12px;display:flex;flex-direction:column;gap:6px}
+.plot-head{display:flex;flex-wrap:wrap;align-items:center;gap:5px 6px}
+.plot-head h2{margin-right:4px}
+.legend{display:contents}
+.lg{display:inline-flex;align-items:center;gap:5px;padding:2px 8px 2px 7px;border:1px solid var(--line);border-radius:99px;font-size:.86rem;cursor:pointer;user-select:none;min-height:30px}
+.lg input{position:absolute;opacity:0;pointer-events:none}
+.lg .sw{width:18px;height:4px;border-radius:2px;background:var(--c)}
+.lg:has(input:not(:checked)){opacity:.45}
+.lg:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+.plot-tools{display:contents}
+#plot{touch-action:none;cursor:ew-resize}
+.refs{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.84rem;color:var(--muted);align-items:center}
+.refs:empty{display:none}
+
+/* ---------- Bedienpult ---------- */
+.side{display:flex;flex-direction:column;gap:8px;padding:8px 12px;overflow:auto}
+.tabs{display:flex}
+.tabs{flex:none}
+.tabs button{flex:1 1 auto;padding-inline:8px;white-space:nowrap}
+.pane{display:flex;flex-direction:column;gap:8px}
+.pane[hidden]{display:none!important}
+.group{display:flex;flex-direction:column;gap:8px}
+.group + .group{border-top:1px solid var(--line);padding-top:8px}
+.ctl{display:grid;grid-template-columns:1fr auto;gap:0 8px;align-items:baseline}
+.pane .group{gap:6px}
+.ctl label{font-size:.93rem}
+.ctl output{font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-size:.9rem;font-weight:600}
+.ctl input[type=range]{grid-column:1/-1}
+input[type=range]{accent-color:var(--accent);width:100%;height:26px;margin:0}
+.note{font-size:.82rem;color:var(--muted);margin:0;line-height:1.35}
+.checks{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}
+.checks label{display:flex;align-items:center;gap:7px;font-size:.9rem;cursor:pointer;min-height:30px}
+.checks input{accent-color:var(--accent);width:18px;height:18px;margin:0}
+.checks .sw{width:14px;height:3px;border-radius:2px;background:var(--c);flex:none}
+.vals{display:grid;grid-template-columns:auto 1fr auto;gap:2px 10px;margin:0;font-size:.92rem;align-items:baseline}
+.vals dt{font-weight:700}
+.vals .desc{color:var(--muted);font-size:.8rem}
+.vals dd{margin:0;font-family:var(--f-mono);font-variant-numeric:tabular-nums;text-align:right;font-weight:600}
+.vals .sep{grid-column:1/-1;border-top:1px solid var(--line);margin:2px 0}
+.vals .hl{color:var(--cRes)}
+i.v{font-family:Georgia,"Times New Roman",serif;font-style:italic}
+sub{font-size:.72em}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hint{font-size:.82rem;color:var(--muted);margin:0}
+</style>
+
+<div class="app">
+  <header class="head">
+    <h1>Looping<span>-</span>Labor</h1>
+    <button type="button" class="info-btn" id="infoBtn" aria-expanded="false" aria-controls="infoPop">Worum geht’s?</button>
+  </header>
+  <div class="info-pop" id="infoPop" hidden>
+    <p class="sub">Ein Massenpunkt fährt durch einen Achterbahn-Looping. Untersuche Kräfte, Zentripetalbeschleunigung und das <i class="v">t</i>-<i class="v">a</i><sub>res</sub>-Diagramm – für kreisrunde und klothoidenförmige Loopings.</p>
+  </div>
+
+  <section class="card stage-card" aria-label="Simulation der Fahrt">
+    <div class="stage-top">
+      <div class="jumps">
+        <span>Springe zu:</span>
+        <button type="button" class="btn small" data-jump="entry">unten (Einfahrt)</button>
+        <button type="button" class="btn small" data-jump="side1">Seite ↑</button>
+        <button type="button" class="btn small" data-jump="top">oben</button>
+        <button type="button" class="btn small" data-jump="side2">Seite ↓</button>
+        <button type="button" class="btn small" data-jump="exit">unten (Ausfahrt)</button>
+      </div>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="stage" aria-label="Bahn mit Massenpunkt und Kraftpfeilen"></canvas>
+      <div class="overlay">
+        <div class="seg" id="viewSeg" role="group" aria-label="Ansicht">
+          <button type="button" data-v="all" aria-pressed="true">Ganze Bahn</button>
+          <button type="button" data-v="loop" aria-pressed="false">Nur Looping</button>
+        </div>
+        <span id="phase" class="chip stage-chip">auf der Schiene</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card transport" aria-label="Zeitsteuerung">
+    <div class="trow">
+      <button type="button" class="btn primary" id="play">▶ Start</button>
+      <button type="button" class="btn icon" id="reset" title="Zurück auf t = 0" aria-label="Zurück auf t = 0">⏮</button>
+      <button type="button" class="btn icon" id="back" title="Zeit −0,02 s" aria-label="Zeit zurück">−</button>
+      <input type="range" id="time" min="0" max="10" step="0.001" value="0" aria-label="Zeit t">
+      <button type="button" class="btn icon" id="fwd" title="Zeit +0,02 s" aria-label="Zeit vor">+</button>
+      <span class="tread"><i class="v">t</i> = <b id="tOut">0,00</b> s <span id="tEndOut" style="color:var(--muted)"></span></span>
+      <select id="speed" aria-label="Wiedergabetempo">
+        <option value="0.1">0,1× Zeitlupe</option>
+        <option value="0.25">0,25×</option>
+        <option value="0.5" selected>0,5×</option>
+        <option value="1">1× Echtzeit</option>
+      </select>
+    </div>
+    <p class="outcome" id="outcome"></p>
+  </section>
+
+  <section class="card plot-card" aria-label="Diagramm">
+    <div class="plot-head">
+      <h2><i class="v">t</i>-<i class="v">a</i>-Diagramm</h2>
+      <div class="legend">
+        <label class="lg" style="--c:var(--cRes)"><input type="checkbox" id="pAres" checked><span class="sw"></span><i class="v">a</i><sub>res</sub></label>
+        <label class="lg" style="--c:var(--cZ)"><input type="checkbox" id="pAz"><span class="sw"></span><i class="v">a</i><sub>Z</sub> (zum Krümmungsmittelpunkt)</label>
+        <label class="lg" style="--c:var(--cT)"><input type="checkbox" id="pAt"><span class="sw"></span><i class="v">a</i><sub>t</sub> (Bahnrichtung)</label>
+        <label class="lg" style="--c:var(--cN)"><input type="checkbox" id="pLoad"><span class="sw"></span><i class="v">F</i><sub>N</sub> / <i class="v">F</i><sub>G</sub> (rechte Achse)</label>
+      </div>
+      <div class="plot-tools">
+        <button type="button" class="btn small" id="keep">Kurve <i class="v">a</i><sub>res</sub> merken</button>
+        <button type="button" class="btn small" id="clearRefs" disabled>Gemerkte Kurven löschen</button>
+      </div>
+    </div>
+    <div class="refs" id="refs"></div>
+    <div class="canvas-wrap"><canvas id="plot" aria-label="Beschleunigung über der Zeit"></canvas></div>
+  </section>
+
+  <aside class="card side" aria-label="Bedienpult">
+    <div class="seg tabs" role="tablist" aria-label="Bedienpult">
+      <button type="button" role="tab" id="tabSet" aria-selected="true" aria-controls="paneSet">Looping &amp; Start</button>
+      <button type="button" role="tab" id="tabVal" aria-selected="false" aria-controls="paneVal">Messwerte</button>
+      <button type="button" role="tab" id="tabArr" aria-selected="false" aria-controls="paneArr">Pfeile</button>
+    </div>
+
+    <div class="pane" id="paneSet" role="tabpanel" aria-labelledby="tabSet">
+      <div class="group" aria-label="Looping">
+        <h2>Looping</h2>
+        <div class="seg" id="shapeSeg" role="group" aria-label="Form des Loopings">
+          <button type="button" data-s="circle" aria-pressed="true">Kreis</button>
+          <button type="button" data-s="clothoid" aria-pressed="false">Klothoide (Tropfen)</button>
+        </div>
+        <div class="ctl"><label for="r" id="rLabel">Radius <i class="v">r</i></label><output id="rOut"></output>
+          <input type="range" id="r" min="3" max="20" step="0.5" value="8"></div>
+        <p class="note" id="loopInfo"></p>
+      </div>
+      <div class="group" aria-label="Startbedingungen">
+        <h2>Start</h2>
+        <div class="ctl"><label for="h">Anlaufhöhe <i class="v">h</i></label><output id="hOut"></output>
+          <input type="range" id="h" min="0" max="60" step="0.1" value="22"></div>
+        <div class="ctl"><label for="v0">Anfangsgeschwindigkeit <i class="v">v</i><sub>0</sub></label><output id="v0Out"></output>
+          <input type="range" id="v0" min="0" max="35" step="0.5" value="0"></div>
+        <div class="ctl"><label for="m">Masse <i class="v">m</i> (Wagen mit Insassen)</label><output id="mOut"></output>
+          <input type="range" id="m" min="50" max="2000" step="10" value="500"></div>
+        <div class="ctl"><label for="mu">Reibungszahl <i class="v">μ</i></label><output id="muOut"></output>
+          <input type="range" id="mu" min="0" max="0.1" step="0.005" value="0"></div>
+        <button type="button" class="btn small" id="hmin">Anlaufhöhe auf Grenzfall setzen</button>
+        <p class="note"><i class="v">h</i> ist die Höhe über dem tiefsten Punkt des Loopings. Der Grenzfall gilt ohne Reibung.</p>
+      </div>
+    </div>
+
+    <div class="pane" id="paneVal" role="tabpanel" aria-labelledby="tabVal" hidden>
+      <div class="group" aria-label="Messwerte">
+        <h2>Messwerte zum Zeitpunkt <i class="v" style="text-transform:none">t</i></h2>
+        <dl class="vals">
+          <dt>h</dt><span class="desc">Höhe</span><dd id="vH"></dd>
+          <dt>v</dt><span class="desc">Geschwindigkeit</span><dd id="vV"></dd>
+          <dt>φ</dt><span class="desc">Bahnwinkel im Looping</span><dd id="vPhi"></dd>
+          <dt>r<sub>K</sub></dt><span class="desc">Krümmungsradius</span><dd id="vRk"></dd>
+          <div class="sep"></div>
+          <dt>a<sub>Z</sub></dt><span class="desc">Zentripetalbeschl.</span><dd id="vAz"></dd>
+          <dt>a<sub>t</sub></dt><span class="desc">Bahnbeschl.</span><dd id="vAt"></dd>
+          <dt class="hl">a<sub>res</sub></dt><span class="desc">resultierende Beschl.</span><dd id="vAres" class="hl"></dd>
+          <div class="sep"></div>
+          <dt>F<sub>G</sub></dt><span class="desc">Gewichtskraft</span><dd id="vFG"></dd>
+          <dt>F<sub>N</sub></dt><span class="desc">Normalkraft der Schiene</span><dd id="vFN"></dd>
+          <dt>F<sub>Z</sub></dt><span class="desc">Zentripetalkraft</span><dd id="vFZ"></dd>
+          <dt>F<sub>res</sub></dt><span class="desc">resultierende Kraft</span><dd id="vFres"></dd>
+          <dt>F<sub>N</sub>/F<sub>G</sub></dt><span class="desc">„gefühlte g-Last“</span><dd id="vLoad"></dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="pane" id="paneArr" role="tabpanel" aria-labelledby="tabArr" hidden>
+      <div class="group" aria-label="Anzeige">
+        <h2>Pfeile und Hilfslinien</h2>
+        <div class="checks">
+          <label style="--c:var(--cG)"><input type="checkbox" id="sG" checked><span class="sw"></span><i class="v">F</i><sub>G</sub></label>
+          <label style="--c:var(--cN)"><input type="checkbox" id="sN" checked><span class="sw"></span><i class="v">F</i><sub>N</sub></label>
+          <label style="--c:var(--cRes)"><input type="checkbox" id="sRes" checked><span class="sw"></span><i class="v">F</i><sub>res</sub></label>
+          <label style="--c:var(--cZ)"><input type="checkbox" id="sDec"><span class="sw"></span><i class="v">F</i><sub>Z</sub> und <i class="v">F</i><sub>t</sub></label>
+          <label style="--c:var(--cV)"><input type="checkbox" id="sV"><span class="sw"></span><i class="v">v</i></label>
+          <label style="--c:var(--muted)"><input type="checkbox" id="sK"><span class="sw"></span>Krümmungskreis</label>
+          <label style="--c:var(--accent)"><input type="checkbox" id="sTrail" checked><span class="sw"></span>Spur</label>
+          <label style="--c:var(--muted)"><input type="checkbox" id="sMarks" checked><span class="sw"></span>Markierungen</label>
+        </div>
+        <p class="note">Alle Kraftpfeile im selben Maßstab: <i class="v">F</i><sub>G</sub> ist immer gleich lang.</p>
+        <p class="hint">Tipp: Den Massenpunkt kannst du auch direkt auf der Bahn ziehen.</p>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>
+/*PHYS*/
+const g = 9.81;
+
+function buildLoop(shape, R){
+  const thc = 0.75*Math.PI;           // Klothoide bis 135°, oben Kreisbogen über 90°
+  let L, kf;
+  if(shape === 'circle'){ L = 2*Math.PI*R; kf = s => 1/R; }
+  else {
+    const L1 = 2*R*thc, La = R*(2*Math.PI - 2*thc);
+    L = 2*L1 + La;
+    kf = s => s < L1 ? s/(L1*R) : (s < L1+La ? 1/R : Math.max(0, L-s)/(L1*R));
+  }
+  const n = Math.ceil(L/0.005), d = L/n;
+  const x=[0], y=[0], th=[0], k=[kf(0)];
+  let X=0, Y=0, TH=0;
+  for(let i=0;i<n;i++){
+    const km = kf((i+0.5)*d);
+    const thm = TH + km*d/2;
+    X += Math.cos(thm)*d; Y += Math.sin(thm)*d; TH += km*d;
+    x.push(X); y.push(Y); th.push(TH); k.push(kf((i+1)*d));
+  }
+  return {x,y,th,k,L};
+}
+
+function buildTrack(p){
+  const X=[],Y=[],TH=[],K=[],SEG=[],LT=[];
+  const lp = buildLoop(p.shape, p.r);
+  let lminX=Infinity,lmaxX=-Infinity,lmaxY=-Infinity;
+  for(let j=0;j<lp.x.length;j++){ lminX=Math.min(lminX,lp.x[j]); lmaxX=Math.max(lmaxX,lp.x[j]); lmaxY=Math.max(lmaxY,lp.y[j]); }
+  const Lf = Math.max(4, -lminX + 3);
+  const Lr = Math.max(5, 1.5*p.h);
+  const xr0 = -Lf - Lr;
+  if(p.h > 0.001){
+    const n = Math.ceil(Lr/0.01);
+    for(let j=0;j<n;j++){
+      const u=j/n, x=xr0+u*Lr, y=p.h*(1-u)*(1-u);
+      const yp=-2*p.h*(1-u)/Lr, ypp=2*p.h/(Lr*Lr);
+      X.push(x);Y.push(y);TH.push(Math.atan(yp));K.push(ypp/Math.pow(1+yp*yp,1.5));SEG.push(0);LT.push(NaN);
+    }
+  }
+  const nf = Math.ceil(Lf/0.01);
+  for(let j=0;j<nf;j++){ X.push(-Lf+j*Lf/nf);Y.push(0);TH.push(0);K.push(0);SEG.push(1);LT.push(NaN); }
+  const loopStart = X.length;
+  for(let j=0;j<lp.x.length;j++){ X.push(lp.x[j]);Y.push(lp.y[j]);TH.push(lp.th[j]);K.push(lp.k[j]);SEG.push(2);LT.push(lp.th[j]); }
+  const loopEnd = X.length-1;
+  const xe=lp.x[lp.x.length-1], ye=lp.y[lp.y.length-1], Le=7, ne=Math.ceil(Le/0.01);
+  for(let j=1;j<=ne;j++){ X.push(xe+j*Le/ne);Y.push(ye);TH.push(2*Math.PI);K.push(0);SEG.push(3);LT.push(NaN); }
+  const N=X.length, S=new Float64Array(N);
+  for(let i=1;i<N;i++) S[i]=S[i-1]+Math.hypot(X[i]-X[i-1],Y[i]-Y[i-1]);
+  // Markierungen im Looping
+  const marks=[];
+  const targets=[[0,'unten'],[Math.PI/2,'Seite'],[Math.PI,'oben'],[1.5*Math.PI,'Seite']];
+  for(const [a,name] of targets){
+    for(let i=loopStart;i<loopEnd;i++){ if(LT[i]<=a && LT[i+1]>a || (a===0 && i===loopStart)){ marks.push({x:X[i],y:Y[i],name,a}); break; } }
+  }
+  // grobe Kopie für Kollisionen
+  const cx=[],cy=[],cs=[];
+  for(let i=0;i<N;i+=3){cx.push(X[i]);cy.push(Y[i]);cs.push(S[i]);}
+  cx.push(X[N-1]);cy.push(Y[N-1]);cs.push(S[N-1]);
+  // Mindesthöhe (ohne Reibung)
+  let hmin=0;
+  for(let i=loopStart;i<=loopEnd;i++){
+    const c=Math.cos(TH[i]); if(c<0 && K[i]>0){ hmin=Math.max(hmin, Y[i]-c/(2*K[i])-p.v0*p.v0/(2*g)); }
+  }
+  return {X:Float64Array.from(X),Y:Float64Array.from(Y),TH:Float64Array.from(TH),K:Float64Array.from(K),SEG:Int8Array.from(SEG),LT:Float64Array.from(LT),S,
+    N,loopStart,loopEnd,marks,coarse:{x:cx,y:cy,s:cs},Lf,Lr,xr0,hmin,
+    loopBox:{x0:lminX,x1:lmaxX,y0:0,y1:lmaxY}, loopH:lmaxY};
+}
+
+function segHit(ax,ay,bx,by,cx,cy,dx,dy){
+  const rx=bx-ax, ry=by-ay, sx=dx-cx, sy=dy-cy;
+  const den=rx*sy-ry*sx; if(Math.abs(den)<1e-14) return null;
+  const u=((cx-ax)*sy-(cy-ay)*sx)/den, v=((cx-ax)*ry-(cy-ay)*rx)/den;
+  return (u>=0&&u<=1&&v>=0&&v<=1)?u:null;
+}
+
+function simulate(tr,p){
+  const {X,Y,TH,K,S,SEG,LT,N}=tr;
+  const keys=['t','x','y','vx','vy','ax','ay','nx','ny','fx','fy','ph','lt'];
+  const R={}; for(const k of keys) R[k]=[];
+  const push=(...a)=>{ for(let q=0;q<keys.length;q++) R[keys[q]].push(a[q]); };
+  const ev={}; let status='end';
+  const mu=p.mu, tmax=60, tol=1e-7;
+  let i=0, dir=1, t=0, w=p.v0*p.v0, turns=0, guard=0;
+  const E=w/2+g*Y[0];
+  const state=(idx,w,dir)=>{ const c=Math.cos(TH[idx]), s=Math.sin(TH[idx]); const Nm=w*K[idx]+g*c;
+    const fr=-mu*Math.max(Nm,0)*dir; return {c,s,v:Math.sqrt(Math.max(0,w)),Nm,fr,as:-g*s+fr,an:w*K[idx]}; };
+  const pushTrack=(idx,w,dir,px,py)=>{ const st=state(idx,w,dir), nx=-st.s, ny=st.c;
+    push(t, px??X[idx], py??Y[idx], dir*st.v*st.c, dir*st.v*st.s, st.as*st.c+st.an*nx, st.as*st.s+st.an*ny,
+      st.Nm*nx, st.Nm*ny, st.fr*st.c, st.fr*st.s, 0, LT[idx]); };
+  const targets=[['side1',Math.PI/2],['top',Math.PI],['side2',1.5*Math.PI]];
+  let detach=null;
+  while(guard++<3e6){
+    if(w<=1e-12){
+      const s=Math.sin(TH[i]), c=Math.cos(TH[i]); const drive=-g*s;
+      if(Math.abs(drive) <= mu*g*Math.max(c,0)+1e-9){ w=0; pushTrack(i,0,dir); status = t>0?'stuck':'rest'; break; }
+      dir = drive>0?1:-1;
+    }
+    const st=state(i,w,dir);
+    if(st.Nm < -tol*g){ detach={i,dir}; break; }
+    pushTrack(i,w,dir);
+    const j=i+dir;
+    if(j<0){status='back';break;}
+    if(j>=N){status='end';break;}
+    const dS=S[j]-S[i];
+    const wn = mu===0 ? 2*(E-g*Y[j]) : w+2*st.as*dS;
+    if(wn<0){
+      const f = w/(w-wn), dtt = w>0 ? 2*f*Math.abs(dS)/Math.sqrt(w) : 0;
+      t+=dtt;
+      const px=X[i]+f*(X[j]-X[i]), py=Y[i]+f*(Y[j]-Y[i]);
+      pushTrack(i,0,dir,px,py);
+      if(!ev.turn) ev.turn={t,y:py};
+      t+=dtt; w=0; turns++;
+      if(turns>12||t>tmax){status='time';break;}
+      continue;
+    }
+    const dt=2*Math.abs(dS)/(Math.sqrt(w)+Math.sqrt(wn));
+    if(dir===1){
+      if(SEG[i]!==2&&SEG[j]===2&&ev.entry==null) ev.entry=t+dt;
+      if(SEG[i]===2&&SEG[j]===2) for(const [key,a] of targets){ if(ev[key]==null&&LT[i]<a&&LT[j]>=a) ev[key]=t+dt*(a-LT[i])/(LT[j]-LT[i]); }
+      if(SEG[i]===2&&SEG[j]===3&&ev.exit==null) ev.exit=t;
+    }
+    t+=dt; w=wn; i=j;
+    if(t>tmax){status='time';break;}
+  }
+  if(detach){
+    const di=detach.i, dr=detach.dir, st=state(di,w,dr);
+    const vx0=dr*st.v*st.c, vy0=dr*st.v*st.s, x0=X[di], y0=Y[di], t0=t, s0=S[di];
+    ev.detach={t:t0,y:y0};
+    status='fall';
+    push(t0,x0,y0,vx0,vy0,0,-g,0,0,0,0,1,NaN);
+    const C=tr.coarse, h=0.003; let px=x0, py=y0;
+    for(let k=1;k<5000;k++){
+      const tau=k*h, x=x0+vx0*tau, y=y0+vy0*tau-0.5*g*tau*tau, vy=vy0-g*tau;
+      let best=null;
+      for(let q=0;q<C.x.length-1;q++){
+        if(tau<0.4 && Math.abs(C.s[q]-s0)<0.5) continue;
+        const u=segHit(px,py,x,y,C.x[q],C.y[q],C.x[q+1],C.y[q+1]);
+        if(u!==null && (best===null||u<best)) best=u;
+      }
+      if(best!==null){
+        const hx=px+best*(x-px), hy=py+best*(y-py), ht=t0+tau-h+best*h;
+        push(ht,hx,hy,vx0,vy0-g*(ht-t0),0,-g,0,0,0,0,1,NaN);
+        status='crash'; ev.crash={t:ht,y:hy}; break;
+      }
+      push(t0+tau,x,y,vx0,vy,0,-g,0,0,0,0,1,NaN);
+      if(y<-40) break;
+      px=x; py=y;
+    }
+  }
+  const out={}; for(const k of keys) out[k]=Float64Array.from(R[k]);
+  return {R:out,ev,status,tEnd:out.t[out.t.length-1]};
+}
+
+function lookupRaw(R,t){
+  const T=R.t, n=T.length;
+  let lo=0;
+  if(n>1 && t>T[0]){
+    if(t>=T[n-1]) lo=n-1;
+    else { let a=0,b=n-1; while(b-a>1){ const m=(a+b)>>1; if(T[m]<=t) a=m; else b=m; } lo=a; }
+  }
+  const hi=Math.min(lo+1,n-1), span=T[hi]-T[lo], f= span>0 ? Math.min(1,Math.max(0,(t-T[lo])/span)) : 0;
+  const L=(k)=>R[k][lo]+(R[k][hi]-R[k][lo])*f;
+  const o={t, x:L('x'),y:L('y'),vx:L('vx'),vy:L('vy'),ax:L('ax'),ay:L('ay'),nx:L('nx'),ny:L('ny'),fx:L('fx'),fy:L('fy'),ph:R.ph[f>0.5?hi:lo]};
+  const l0=R.lt[lo], l1=R.lt[hi]; o.lt = (isFinite(l0)&&isFinite(l1)) ? l0+(l1-l0)*f : (isFinite(l0)?l0:NaN);
+  o.v=Math.hypot(o.vx,o.vy); o.ares=Math.hypot(o.ax,o.ay);
+  if(o.v>1e-6){ o.at=(o.ax*o.vx+o.ay*o.vy)/o.v; o.anS=(o.ay*o.vx-o.ax*o.vy)/o.v; }
+  else { o.at=o.ares; o.anS=0; }
+  o.az=Math.abs(o.anS);
+  o.N=Math.hypot(o.nx,o.ny); o.load=o.N/g;
+  o.rK = o.az>1e-6 ? o.v*o.v/o.az : Infinity;
+  return o;
+}
+/*END*/
+
+// ---------- Zustand ----------
+const P={shape:'circle', r:8, h:22, v0:0, m:500, mu:0};
+let sim=null, T=0, playing=false, speed=0.5, view='all', refs=[], dirty=true, lastXf=null;
+const $=id=>document.getElementById(id);
+const fmt=(x,d=1)=>{ if(!isFinite(x)) return '∞'; const r=Number(x.toFixed(d)); const s=Math.abs(r).toFixed(d).replace('.',','); return (r<0?'−':'')+s; };
+const fmtF=(F)=> Math.abs(F)>=10000 ? fmt(F/1000,1)+' kN' : fmt(F,0)+' N';
+
+function rebuild(){
+  const tr=buildTrack(P);
+  const s=simulate(tr,P);
+  sim={track:tr,...s};
+  // gleichmäßig abgetastete Kurven
+  const n=1400, tE=sim.tEnd;
+  const pl={t:new Float64Array(n+1),x:new Float64Array(n+1),y:new Float64Array(n+1),ares:new Float64Array(n+1),az:new Float64Array(n+1),at:new Float64Array(n+1),load:new Float64Array(n+1),ph:new Uint8Array(n+1)};
+  let vmax=0, amax=0, tAmax=0, lmax=0;
+  for(let k=0;k<=n;k++){
+    const t=tE*k/n, o=lookupRaw(sim.R,t);
+    pl.t[k]=t;pl.x[k]=o.x;pl.y[k]=o.y;pl.ares[k]=o.ares;pl.az[k]=o.az;pl.at[k]=o.at;pl.load[k]=o.load;pl.ph[k]=o.ph;
+    vmax=Math.max(vmax,o.v);
+    if(o.ph===0 && o.ares>amax){amax=o.ares;tAmax=t;}
+    if(o.ph===0) lmax=Math.max(lmax,o.load);
+  }
+  sim.plot=pl; sim.vmax=Math.max(vmax,1); sim.amax=amax; sim.tAmax=tAmax; sim.lmax=lmax;
+  // Box inkl. Flugbahn
+  let x0=Infinity,x1=-Infinity,y0=0,y1=-Infinity;
+  const X=tr.X,Y=tr.Y; for(let i=0;i<tr.N;i+=5){x0=Math.min(x0,X[i]);x1=Math.max(x1,X[i]);y1=Math.max(y1,Y[i]);y0=Math.min(y0,Y[i]);}
+  for(let k=0;k<=n;k++){x0=Math.min(x0,pl.x[k]);x1=Math.max(x1,pl.x[k]);y0=Math.min(y0,pl.y[k]);}
+  sim.box={x0,x1,y0,y1};
+  if(T>sim.tEnd) T=sim.tEnd;
+  const tr_=$('time'); tr_.max=Math.max(sim.tEnd,0.001).toFixed(3); tr_.value=T;
+  $('tEndOut').textContent='/ '+fmt(sim.tEnd,2)+' s';
+  for(const b of document.querySelectorAll('[data-jump]')) b.disabled = sim.ev[b.dataset.jump]==null;
+  updateOutcome(); updateLoopInfo();
+  dirty=true;
+}
+
+function updateOutcome(){
+  const o=$('outcome'), ev=sim.ev; let txt='', cls='';
+  const aTxt=` Größte Beschleunigung auf der Schiene: <b>${fmt(sim.amax,1)} m/s²</b> (${fmt(sim.amax/g,1)} g) bei t = ${fmt(sim.tAmax,2)} s; größte Last F<sub>N</sub>/F<sub>G</sub> = ${fmt(sim.lmax,1)}.`;
+  switch(sim.status){
+    case 'end': txt='<b>Looping geschafft.</b>'+aTxt; cls='good'; break;
+    case 'fall': case 'crash': txt=`<b>Der Massenpunkt löst sich bei t = ${fmt(ev.detach.t,2)} s in ${fmt(ev.detach.y,1)} m Höhe von der Schiene</b> (F<sub>N</sub> = 0) und fällt frei${sim.status==='crash'?`, bis er bei t = ${fmt(ev.crash.t,2)} s wieder auf die Bahn trifft`:''}.`; cls='bad'; break;
+    case 'back': txt=`<b>Zu wenig Energie:</b> Der Massenpunkt kehrt bei t = ${fmt(ev.turn.t,2)} s in ${fmt(ev.turn.y,1)} m Höhe um und rollt zurück zum Start.`; cls='bad'; break;
+    case 'stuck': txt='<b>Der Massenpunkt bleibt liegen</b> – die Reibung hat die Bewegungsenergie aufgezehrt.'; cls='bad'; break;
+    case 'rest': txt='Der Massenpunkt ruht. Stelle eine Anlaufhöhe oder eine Anfangsgeschwindigkeit ein.'; break;
+    default: txt='Die Fahrt wurde nach 60 s beendet.';
+  }
+  o.innerHTML=txt; o.className='outcome '+cls;
+}
+function updateLoopInfo(){
+  const tr=sim.track;
+  $('loopInfo').innerHTML = P.shape==='circle'
+    ? `Loopinghöhe ${fmt(tr.loopH,1)} m. Krümmungsradius überall ${fmt(P.r,1)} m.`
+    : `Loopinghöhe ${fmt(tr.loopH,1)} m. Der Krümmungsradius sinkt von ∞ (Einfahrt) auf ${fmt(P.r,1)} m (Scheitel).`;
+}
+
+// ---------- Zeichnen ----------
+function cssv(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+function colors(){ const o={}; for(const k of ['panel','sunk','ink','muted','line','grid','accent','track','cG','cN','cRes','cZ','cT','cV','cR','ref','bg']) o[k]=cssv('--'+k); return o; }
+function fitCanvas(cv){
+  const r=cv.getBoundingClientRect(), d=window.devicePixelRatio||1;
+  const w=Math.max(1,Math.round(r.width*d)), h=Math.max(1,Math.round(r.height*d));
+  if(cv.width!==w||cv.height!==h){cv.width=w;cv.height=h;}
+  const ctx=cv.getContext('2d'); ctx.setTransform(d,0,0,d,0,0); return {ctx,W:r.width,H:r.height};
+}
+const FONT='"Atkinson Hyperlegible",system-ui,sans-serif';
+function label(ctx,main,sub,x,y,color,align='left',size=14){
+  ctx.fillStyle=color; ctx.textBaseline='middle';
+  ctx.font=`italic 700 ${size}px Georgia,"Times New Roman",serif`; const w1=ctx.measureText(main).width;
+  ctx.font=`700 ${size*0.72}px ${FONT}`; const w2=sub?ctx.measureText(sub).width:0;
+  let x0 = align==='center'? x-(w1+w2)/2 : align==='right'? x-(w1+w2) : x;
+  ctx.font=`italic 700 ${size}px Georgia,"Times New Roman",serif`; ctx.fillText(main,x0,y);
+  if(sub){ ctx.font=`700 ${size*0.72}px ${FONT}`; ctx.fillText(sub,x0+w1+1,y+size*0.3); }
+}
+function arrow(ctx,x,y,dx,dy,color,{w=3,dash=null,main='',sub='',size=14}={}){
+  const L=Math.hypot(dx,dy); if(L<3) return;
+  const ux=dx/L, uy=dy/L, hd=Math.min(12,L*0.45);
+  ctx.save(); ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=w; ctx.lineCap='round';
+  if(dash) ctx.setLineDash(dash);
+  ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+dx-ux*hd*0.8,y+dy-uy*hd*0.8); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(x+dx,y+dy);
+  ctx.lineTo(x+dx-ux*hd-uy*hd*0.45,y+dy-uy*hd+ux*hd*0.45);
+  ctx.lineTo(x+dx-ux*hd+uy*hd*0.45,y+dy-uy*hd-ux*hd*0.45); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  if(main) label(ctx,main,sub,x+dx+ux*14,y+dy+uy*14,color,'center',size);
+}
+function niceStep(range,target){ const raw=range/Math.max(1,target); const p=Math.pow(10,Math.floor(Math.log10(raw))); const m=raw/p; return (m<1.5?1:m<3.5?2:m<7.5?5:10)*p; }
+
+function drawStage(c){
+  const cv=$('stage'); const {ctx,W,H}=fitCanvas(cv);
+  ctx.fillStyle=c.panel; ctx.fillRect(0,0,W,H);
+  const tr=sim.track;
+  let b;
+  if(view==='loop'){ const lb=tr.loopBox, pad=Math.max(2,0.22*Math.max(lb.x1-lb.x0,lb.y1)); b={x0:lb.x0-pad,x1:lb.x1+pad,y0:-0.8,y1:lb.y1+pad*0.6}; }
+  else { const bb=sim.box; b={x0:bb.x0-3,x1:bb.x1+1.5,y0:Math.min(bb.y0,0)-1,y1:bb.y1+2}; }
+  const mg=18, sc=Math.min((W-2*mg)/(b.x1-b.x0),(H-2*mg)/(b.y1-b.y0));
+  const ox=(W-sc*(b.x1-b.x0))/2-b.x0*sc, oy=H-(H-sc*(b.y1-b.y0))/2+b.y0*sc;
+  const sx=x=>ox+x*sc, sy=y=>oy-y*sc;
+  lastXf={sx,sy,sc};
+  // Raster
+  const st=niceStep(Math.max(b.x1-b.x0,b.y1-b.y0),12);
+  ctx.strokeStyle=c.grid; ctx.lineWidth=1; ctx.beginPath();
+  for(let x=Math.ceil(b.x0/st)*st;x<=b.x1;x+=st){ctx.moveTo(sx(x),0);ctx.lineTo(sx(x),H);}
+  for(let y=Math.ceil(b.y0/st)*st;y<=b.y1+st;y+=st){ctx.moveTo(0,sy(y));ctx.lineTo(W,sy(y));}
+  ctx.stroke();
+  // Maßstab
+  const barPx=st*sc;
+  ctx.strokeStyle=c.muted; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(14,H-14); ctx.lineTo(14+barPx,H-14); ctx.moveTo(14,H-19); ctx.lineTo(14,H-9); ctx.moveTo(14+barPx,H-19); ctx.lineTo(14+barPx,H-9); ctx.stroke();
+  ctx.fillStyle=c.muted; ctx.font=`600 12px ${FONT}`; ctx.textBaseline='bottom'; ctx.textAlign='left'; ctx.fillText(fmt(st,0)+' m',18+barPx,H-8);
+  // Boden
+  ctx.strokeStyle=c.muted; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(0,sy(0)); ctx.lineTo(W,sy(0)); ctx.stroke();
+  ctx.lineWidth=1; ctx.beginPath(); for(let x=0;x<W;x+=9){ctx.moveTo(x,sy(0)+1);ctx.lineTo(x-6,sy(0)+7);} ctx.stroke();
+  // Stützen
+  const X=tr.X,Y=tr.Y; ctx.strokeStyle=c.line; ctx.lineWidth=1.5; ctx.beginPath();
+  const spacing=Math.max(1.5,st/2); let next=X[0];
+  for(let i=0;i<tr.loopStart;i++){ if(X[i]>=next){ if(Y[i]>0.2){ctx.moveTo(sx(X[i]),sy(Y[i]));ctx.lineTo(sx(X[i]),sy(0));} next+=spacing; } }
+  ctx.stroke();
+  // Bahn
+  ctx.strokeStyle=c.track; ctx.lineWidth=Math.max(3,Math.min(5,sc*0.18)); ctx.lineJoin='round'; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(sx(X[0]),sy(Y[0])); for(let i=2;i<tr.N;i+=2) ctx.lineTo(sx(X[i]),sy(Y[i])); ctx.lineTo(sx(X[tr.N-1]),sy(Y[tr.N-1])); ctx.stroke();
+  // Startplattform
+  ctx.fillStyle=c.track; ctx.fillRect(sx(X[0])-8,sy(Y[0])-3,10,5);
+  // Maßlinien
+  const lb=tr.loopBox;
+  if(view==='all' && P.h>0.05){
+    const xh=sx(tr.xr0)-14;
+    ctx.strokeStyle=c.muted; ctx.lineWidth=1; ctx.setLineDash([3,3]); ctx.beginPath(); ctx.moveTo(sx(tr.xr0)-20,sy(P.h)); ctx.lineTo(sx(tr.xr0),sy(P.h)); ctx.stroke(); ctx.setLineDash([]);
+    if(sy(0)-sy(P.h)>22){ arrow(ctx,xh,(sy(0)+sy(P.h))/2,0,sy(P.h)-(sy(0)+sy(P.h))/2,c.muted,{w:1.2}); arrow(ctx,xh,(sy(0)+sy(P.h))/2,0,sy(0)-(sy(0)+sy(P.h))/2,c.muted,{w:1.2}); }
+    label(ctx,'h','',xh-10,(sy(0)+sy(P.h))/2,c.muted,'right',15);
+  }
+  if(sim.track && $('sMarks').checked){
+    const cxm=(lb.x0+lb.x1)/2, cym=lb.y1/2;
+    if(P.shape==='circle'){
+      const ang=-0.75*Math.PI; const ex=P.r*Math.cos(ang), ey=P.r+P.r*Math.sin(ang);
+      ctx.strokeStyle=c.muted; ctx.lineWidth=1; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(sx(0),sy(P.r)); ctx.lineTo(sx(ex),sy(ey)); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle=c.muted; ctx.beginPath(); ctx.arc(sx(0),sy(P.r),2.5,0,7); ctx.fill();
+      label(ctx,'r','',(sx(0)+sx(ex))/2-8,(sy(P.r)+sy(ey))/2+2,c.muted,'right',14);
+    }
+    for(const mk of tr.marks){
+      let dx=mk.x-cxm, dy=mk.y-cym; const L=Math.hypot(dx,dy)||1; dx/=L; dy/=L;
+      if(mk.a===0){dx=0;dy=-1;}
+      const px=sx(mk.x), py=sy(mk.y);
+      ctx.fillStyle=c.panel; ctx.strokeStyle=c.muted; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(px,py,4,0,7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle=c.muted; ctx.font=`600 12px ${FONT}`; ctx.textAlign= dx>0.3?'left':dx<-0.3?'right':'center'; ctx.textBaseline= dy>0.3?'bottom':dy<-0.3?'top':'middle';
+      ctx.fillText(mk.name, px+dx*12, py-dy*12);
+    }
+  }
+  const pl=sim.plot, n=pl.t.length-1, kNow=sim.tEnd>0?Math.floor(T/sim.tEnd*n):0;
+  // Spur
+  if($('sTrail').checked && kNow>0){
+    ctx.strokeStyle=c.accent; ctx.globalAlpha=0.75; ctx.lineWidth=2.5; ctx.beginPath(); ctx.moveTo(sx(pl.x[0]),sy(pl.y[0]));
+    for(let k=1;k<=kNow;k++) ctx.lineTo(sx(pl.x[k]),sy(pl.y[k]));
+    ctx.stroke(); ctx.globalAlpha=1;
+  }
+  // Zustand
+  const o=lookupRaw(sim.R,T); const x=sx(o.x), y=sy(o.y);
+  // Krümmungskreis
+  if($('sK').checked && o.az>1e-4 && o.v>1e-3 && o.rK<400){
+    const nvx=-o.vy/o.v, nvy=o.vx/o.v, sgn=Math.sign(o.anS)||1;
+    const cx=o.x+nvx*sgn*o.rK, cy=o.y+nvy*sgn*o.rK;
+    ctx.strokeStyle=c.muted; ctx.lineWidth=1.2; ctx.setLineDash([5,5]); ctx.beginPath(); ctx.arc(sx(cx),sy(cy),o.rK*sc,0,7); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(sx(cx),sy(cy)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=c.muted; ctx.beginPath(); ctx.arc(sx(cx),sy(cy),3,0,7); ctx.fill();
+    label(ctx,'r','K',(x+sx(cx))/2+8,(y+sy(cy))/2,c.muted,'left',13);
+  }
+  // Pfeile: 34 px entsprechen F_G
+  const k=34/g;
+  if($('sDec').checked && o.v>1e-3){
+    const ux=o.vx/o.v, uy=o.vy/o.v, nvx=-uy, nvy=ux;
+    arrow(ctx,x,y,nvx*o.anS*k,-nvy*o.anS*k,c.cZ,{w:2.5,dash:[6,4],main:'F',sub:'Z',size:13});
+    arrow(ctx,x,y,ux*o.at*k,-uy*o.at*k,c.cT,{w:2.5,dash:[6,4],main:'F',sub:'t',size:13});
+  }
+  if($('sG').checked) arrow(ctx,x,y,0,g*k,c.cG,{main:'F',sub:'G'});
+  if($('sN').checked && o.N>1e-3) arrow(ctx,x,y,o.nx*k,-o.ny*k,c.cN,{main:'F',sub:'N'});
+  if(P.mu>0 && Math.hypot(o.fx,o.fy)*k>3) arrow(ctx,x,y,o.fx*k,-o.fy*k,c.cR,{w:2.5,main:'F',sub:'R',size:13});
+  if($('sRes').checked) arrow(ctx,x,y,o.ax*k,-o.ay*k,c.cRes,{w:3.5,main:'F',sub:'res'});
+  if($('sV').checked){ const kv=70/sim.vmax; arrow(ctx,x,y,o.vx*kv,-o.vy*kv,c.cV,{w:2.5,main:'v',sub:''}); }
+  // Massenpunkt
+  ctx.fillStyle=c.panel; ctx.beginPath(); ctx.arc(x,y,9,0,7); ctx.fill();
+  ctx.fillStyle=c.ink; ctx.beginPath(); ctx.arc(x,y,6.5,0,7); ctx.fill();
+  return o;
+}
+
+function drawPlot(c){
+  const cv=$('plot'); const {ctx,W,H}=fitCanvas(cv);
+  ctx.fillStyle=c.panel; ctx.fillRect(0,0,W,H);
+  const Lm=50, Rm=46, Tm=22, Bm=30, pw=W-Lm-Rm, ph=H-Tm-Bm;
+  const pl=sim.plot, sh={ares:$('pAres').checked, az:$('pAz').checked, at:$('pAt').checked, load:$('pLoad').checked};
+  let ymin=0, ymax=2*g, xmax=Math.max(sim.tEnd,0.5);
+  const scan=(arr,mul=1)=>{ for(let i=0;i<arr.length;i++){ const v=arr[i]*mul; if(v>ymax) ymax=v; if(v<ymin) ymin=v; } };
+  if(sh.ares) scan(pl.ares); if(sh.az) scan(pl.az); if(sh.at) scan(pl.at); if(sh.load) scan(pl.load,g);
+  for(const r of refs){ scan(r.a); xmax=Math.max(xmax,r.t[r.t.length-1]); }
+  ymax*=1.06; if(ymin<0) ymin*=1.1;
+  const X=t=>Lm+t/xmax*pw, Y=v=>Tm+(ymax-v)/(ymax-ymin)*ph;
+  plotXf={Lm,pw,xmax};
+  // Raster
+  const ys=niceStep(ymax-ymin,6);
+  ctx.font=`500 11.5px ${FONT}`; ctx.lineWidth=1;
+  for(let v=Math.ceil(ymin/ys)*ys; v<=ymax; v+=ys){
+    ctx.strokeStyle=c.grid; ctx.beginPath(); ctx.moveTo(Lm,Y(v)); ctx.lineTo(Lm+pw,Y(v)); ctx.stroke();
+    ctx.fillStyle=c.muted; ctx.textAlign='right'; ctx.textBaseline='middle'; ctx.fillText(fmt(v,0),Lm-6,Y(v));
+  }
+  const gs=niceStep((ymax-ymin)/g,6);
+  for(let q=Math.ceil(ymin/g/gs)*gs; q*g<=ymax; q+=gs){
+    ctx.strokeStyle=c.line; ctx.beginPath(); ctx.moveTo(Lm+pw,Y(q*g)); ctx.lineTo(Lm+pw+5,Y(q*g)); ctx.stroke();
+    ctx.fillStyle=c.muted; ctx.textAlign='left'; ctx.fillText(fmt(q,0)+' g',Lm+pw+8,Y(q*g));
+  }
+  const xs=niceStep(xmax,10);
+  for(let t=0;t<=xmax+1e-9;t+=xs){
+    ctx.strokeStyle=c.grid; ctx.beginPath(); ctx.moveTo(X(t),Tm); ctx.lineTo(X(t),Tm+ph); ctx.stroke();
+    ctx.fillStyle=c.muted; ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillText(fmt(t,xs<1?1:0),X(t),Tm+ph+6);
+  }
+  ctx.strokeStyle=c.muted; ctx.lineWidth=1.2; ctx.beginPath(); ctx.moveTo(Lm,Tm); ctx.lineTo(Lm,Tm+ph); ctx.moveTo(Lm,Y(0)); ctx.lineTo(Lm+pw,Y(0)); ctx.stroke();
+  label(ctx,'a','',Lm-44,10,c.muted,'left',13); ctx.fillStyle=c.muted; ctx.font=`500 11.5px ${FONT}`; ctx.textBaseline='middle'; ctx.textAlign='left'; ctx.fillText('in m/s²',Lm-34,11);
+  ctx.textAlign='right'; ctx.fillText('Vielfache von g',W-4,11);
+  ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('t in s',Lm+pw,H-1);
+  // Ereignisse
+  if(sim.ev.detach){ ctx.strokeStyle=c.cRes; ctx.setLineDash([2,4]); ctx.beginPath(); ctx.moveTo(X(sim.ev.detach.t),Tm); ctx.lineTo(X(sim.ev.detach.t),Tm+ph); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=c.cRes; ctx.textAlign='left'; ctx.textBaseline='top'; ctx.font=`700 11.5px ${FONT}`; ctx.fillText('löst sich',X(sim.ev.detach.t)+4,Tm+2); }
+  // Referenzen
+  refs.forEach((r,ri)=>{ ctx.strokeStyle=c.ref; ctx.lineWidth=1.8; ctx.setLineDash(r.dash); ctx.beginPath();
+    for(let i=0;i<r.t.length;i++){ const px=X(r.t[i]),py=Y(r.a[i]); i?ctx.lineTo(px,py):ctx.moveTo(px,py);} ctx.stroke(); ctx.setLineDash([]); });
+  const line=(arr,col,mul=1,w=2.2)=>{ ctx.strokeStyle=col; ctx.lineWidth=w; ctx.lineJoin='round'; ctx.beginPath();
+    for(let i=0;i<arr.length;i++){ const px=X(pl.t[i]),py=Y(arr[i]*mul); i?ctx.lineTo(px,py):ctx.moveTo(px,py);} ctx.stroke(); };
+  ctx.save(); ctx.beginPath(); ctx.rect(Lm,Tm-2,pw+1,ph+4); ctx.clip();
+  if(sh.load) line(pl.load,c.cN,g,1.8);
+  if(sh.at) line(pl.at,c.cT,1,1.8);
+  if(sh.az) line(pl.az,c.cZ,1,1.8);
+  if(sh.ares) line(pl.ares,c.cRes,1,2.6);
+  ctx.restore();
+  // Cursor
+  const o=lookupRaw(sim.R,T), cx=X(T);
+  ctx.strokeStyle=c.accent; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(cx,Tm); ctx.lineTo(cx,Tm+ph); ctx.stroke();
+  const dot=(v,col)=>{ ctx.fillStyle=col; ctx.beginPath(); ctx.arc(cx,Y(v),4.5,0,7); ctx.fill(); ctx.strokeStyle=c.panel; ctx.lineWidth=1.5; ctx.stroke(); };
+  if(sh.load) dot(o.load*g,c.cN); if(sh.at) dot(o.at,c.cT); if(sh.az) dot(o.az,c.cZ); if(sh.ares) dot(o.ares,c.cRes);
+}
+let plotXf=null;
+
+function updateValues(o){
+  const m=P.m, set=(id,s)=>{$(id).textContent=s;};
+  set('vH',fmt(o.y,2)+' m');
+  set('vV',fmt(o.v,2)+' m/s');
+  set('vPhi', isFinite(o.lt)&&o.ph===0 ? fmt(o.lt*180/Math.PI,0)+'°' : '–');
+  set('vRk', o.ph===0||o.az>1e-4 ? (isFinite(o.rK)&&o.rK<1e4? fmt(o.rK,2)+' m':'∞ (gerade)') : '–');
+  set('vAz',fmt(o.az,2)+' m/s²'); set('vAt',fmt(o.at,2)+' m/s²'); set('vAres',fmt(o.ares,2)+' m/s²');
+  set('vFG',fmtF(m*g)); set('vFN',fmtF(m*o.N)); set('vFZ',fmtF(m*o.az)); set('vFres',fmtF(m*o.ares));
+  set('vLoad',fmt(o.load,2));
+  const ph=$('phase');
+  if(o.ph===1){ ph.textContent= sim.status==='crash'&&T>=sim.ev.crash.t-1e-6 ? 'Aufprall auf der Bahn' : 'löst sich – freier Fall'; ph.className='chip fall'; }
+  else if(o.v<0.02){ ph.textContent= sim.status==='rest'||sim.status==='stuck' ? 'in Ruhe' : 'Umkehrpunkt (v = 0)'; ph.className='chip idle'; }
+  else { ph.textContent='auf der Schiene'; ph.className='chip'; }
+  $('tOut').textContent=fmt(T,2);
+}
+
+function frame(){
+  if(playing||dirty){
+    const c=colors();
+    const o=drawStage(c); drawPlot(c); updateValues(o);
+    dirty=false;
+  }
+}
+let lastTs=null;
+function loop(ts){
+  if(playing){
+    if(lastTs!=null){ T+= (ts-lastTs)/1000*speed; if(T>=sim.tEnd){T=sim.tEnd; setPlaying(false);} $('time').value=T; }
+    lastTs=ts;
+  } else lastTs=null;
+  frame();
+  requestAnimationFrame(loop);
+}
+function setPlaying(v){
+  if(v && T>=sim.tEnd-1e-9) T=0;
+  playing=v && sim.tEnd>0; $('play').textContent=playing?'❚❚ Pause':'▶ Start'; dirty=true;
+}
+function setT(t){ T=Math.min(Math.max(0,t),sim.tEnd); $('time').value=T; dirty=true; }
+
+// ---------- Bedienung ----------
+function syncOutputs(){
+  $('rOut').textContent=fmt(P.r,1)+' m'; $('hOut').textContent=fmt(P.h,1)+' m'; $('v0Out').textContent=fmt(P.v0,1)+' m/s';
+  $('mOut').textContent=fmt(P.m,0)+' kg'; $('muOut').textContent=fmt(P.mu,3);
+  $('rLabel').innerHTML = P.shape==='circle' ? 'Radius <i class="v">r</i>' : 'Scheitelradius <i class="v">r</i> (oben)';
+}
+for(const id of ['r','h','v0','m','mu']){
+  $(id).addEventListener('input',e=>{ P[id]=parseFloat(e.target.value); syncOutputs(); if(id==='m'){dirty=true;} else rebuild(); });
+}
+function segBind(segId,attr,fn){ $(segId).addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return;
+  for(const x of $(segId).querySelectorAll('button')) x.setAttribute('aria-pressed',x===b?'true':'false'); fn(b.dataset[attr]); }); }
+segBind('shapeSeg','s',v=>{P.shape=v; syncOutputs(); rebuild();});
+segBind('viewSeg','v',v=>{view=v; dirty=true;});
+$('play').onclick=()=>setPlaying(!playing);
+$('reset').onclick=()=>{setPlaying(false); setT(0);};
+$('back').onclick=()=>{setPlaying(false); setT(T-0.02);};
+$('fwd').onclick=()=>{setPlaying(false); setT(T+0.02);};
+$('time').addEventListener('input',e=>{ setPlaying(false); T=parseFloat(e.target.value); dirty=true; });
+$('speed').onchange=e=>{speed=parseFloat(e.target.value);};
+for(const b of document.querySelectorAll('[data-jump]')) b.onclick=()=>{ const t=sim.ev[b.dataset.jump]; if(t!=null){ setPlaying(false); setT(t);} };
+for(const id of ['pAres','pAz','pAt','pLoad','sG','sN','sRes','sDec','sV','sK','sTrail','sMarks']) $(id).addEventListener('change',()=>{dirty=true;});
+$('hmin').onclick=()=>{ const tr=buildTrack(P); let h=Math.ceil((tr.hmin+1e-9)*10)/10; h=Math.min(60,h); P.h=h; $('h').value=h; syncOutputs(); rebuild(); setT(0); };
+const dashes=[[7,4],[2,4],[10,4,2,4],[4,4]];
+$('keep').onclick=()=>{
+  if(refs.length>=4) refs.shift();
+  const pl=sim.plot;
+  refs.push({t:pl.t.slice(),a:pl.ares.slice(),dash:dashes[refs.length%4],
+    label:`${P.shape==='circle'?'Kreis':'Klothoide'}, r = ${fmt(P.r,1)} m, h = ${fmt(P.h,1)} m${P.v0?`, v₀ = ${fmt(P.v0,1)} m/s`:''}${P.mu?`, μ = ${fmt(P.mu,3)}`:''}`});
+  renderRefs(); dirty=true;
+};
+$('clearRefs').onclick=()=>{refs=[]; renderRefs(); dirty=true;};
+function renderRefs(){
+  $('refs').innerHTML=refs.map(r=>`<span><svg width="22" height="6" aria-hidden="true" style="vertical-align:middle;margin-right:5px"><line x1="0" y1="3" x2="22" y2="3" stroke="var(--ref)" stroke-width="2" stroke-dasharray="${r.dash.join(' ')}"/></svg>${r.label}</span>`).join('');
+  $('clearRefs').disabled=refs.length===0;
+}
+// Ziehen im Diagramm
+(function(){ const cv=$('plot'); let down=false;
+  const at=e=>{ if(!plotXf) return; const r=cv.getBoundingClientRect(); const t=(e.clientX-r.left-plotXf.Lm)/plotXf.pw*plotXf.xmax; setPlaying(false); setT(t); };
+  cv.addEventListener('pointerdown',e=>{down=true; cv.setPointerCapture(e.pointerId); at(e);});
+  cv.addEventListener('pointermove',e=>{ if(down) at(e); });
+  cv.addEventListener('pointerup',()=>{down=false;}); cv.addEventListener('pointercancel',()=>{down=false;});
+})();
+// Ziehen auf der Bahn
+(function(){ const cv=$('stage'); let down=false;
+  const at=(e,first)=>{ if(!lastXf) return; const r=cv.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top;
+    const pl=sim.plot; let best=-1, bc=Infinity;
+    for(let k=0;k<pl.t.length;k++){ const d=Math.hypot(lastXf.sx(pl.x[k])-mx,lastXf.sy(pl.y[k])-my); if(d>40) continue; const cst=d+6*Math.abs(pl.t[k]-T); if(cst<bc){bc=cst;best=k;} }
+    if(best>=0){ setPlaying(false); setT(pl.t[best]); } };
+  cv.addEventListener('pointerdown',e=>{down=true; cv.setPointerCapture(e.pointerId); cv.style.cursor='grabbing'; at(e,true);});
+  cv.addEventListener('pointermove',e=>{ if(down) at(e); });
+  const up=()=>{down=false; cv.style.cursor='grab';}; cv.addEventListener('pointerup',up); cv.addEventListener('pointercancel',up);
+})();
+document.addEventListener('keydown',e=>{
+  const tag=e.target.tagName;
+  if(e.key===' ' && tag!=='BUTTON' && tag!=='SELECT' && !(tag==='INPUT'&&e.target.type!=='range')){ e.preventDefault(); setPlaying(!playing); }
+});
+new ResizeObserver(()=>{dirty=true;}).observe(document.body);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{dirty=true;});
+new MutationObserver(()=>{dirty=true;}).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+if(document.fonts) document.fonts.ready.then(()=>{dirty=true;});
+
+syncOutputs(); rebuild(); requestAnimationFrame(loop);
+// ---------- V2: Reiter, Info, Größenänderungen ----------
+function showTab(which){
+  for(const [k,tab,pane] of [['set','tabSet','paneSet'],['val','tabVal','paneVal'],['arr','tabArr','paneArr']]){
+    $(tab).setAttribute('aria-selected', k===which?'true':'false'); $(pane).hidden = k!==which;
+  }
+}
+$('tabSet').onclick=()=>showTab('set');
+$('tabVal').onclick=()=>showTab('val');
+$('tabArr').onclick=()=>showTab('arr');
+for(const b of document.querySelectorAll('[data-jump]')) b.addEventListener('click',()=>showTab('val'));
+$('infoBtn').onclick=()=>{ const pop=$('infoPop'), open=pop.hidden; pop.hidden=!open; $('infoBtn').setAttribute('aria-expanded',open?'true':'false'); };
+document.addEventListener('pointerdown',e=>{ if(!$('infoPop').hidden && !e.target.closest('#infoPop,#infoBtn')){ $('infoPop').hidden=true; $('infoBtn').setAttribute('aria-expanded','false'); } });
+{ const ro=new ResizeObserver(()=>{dirty=true;}); for(const el of document.querySelectorAll('.canvas-wrap')) ro.observe(el); }
+window.addEventListener('resize',()=>{dirty=true;});
+</script>
+
+</body></html>
